@@ -1,0 +1,7 @@
+node_modules
+.cache
+frontend/dist
+dist
+.git
+.DS_Store
+*.tsbuildinfo

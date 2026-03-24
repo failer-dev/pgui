@@ -1,0 +1,59 @@
+version: "3"
+
+tasks:
+  example:up:
+    desc: "Start the full demo environment with Postgres seed data and pgui"
+    cmds:
+      - docker compose -f example/docker-compose.yml up -d --build
+      - task: example:_wait-postgres
+      - task: example:_wait-pgui
+      - echo ""
+      - echo "pgui demo is ready:"
+      - echo "  http://localhost:8080"
+
+  example:down:
+    desc: "Stop the demo environment"
+    cmds:
+      - docker compose -f example/docker-compose.yml down
+
+  example:reset:
+    desc: "Reset demo containers and volumes"
+    cmds:
+      - docker compose -f example/docker-compose.yml down -v --remove-orphans
+
+  example:logs:
+    desc: "Tail demo logs"
+    cmds:
+      - docker compose -f example/docker-compose.yml logs -f postgres pgui
+
+  example:_wait-postgres:
+    internal: true
+    cmds:
+      - |
+        for i in $(seq 1 60); do
+          CID=$(docker compose -f example/docker-compose.yml ps -q postgres)
+          if [ -n "$CID" ] && docker inspect "$CID" 2>/dev/null | grep -q '"Status": "healthy"'; then
+            echo "postgres is healthy"
+            exit 0
+          fi
+          echo "waiting for postgres ($i/60)..."
+          sleep 2
+        done
+        echo "postgres did not become healthy"
+        exit 1
+
+  example:_wait-pgui:
+    internal: true
+    cmds:
+      - |
+        for i in $(seq 1 60); do
+          STATUS=$(curl -fsS http://localhost:8080/api/connection/status 2>/dev/null || true)
+          if echo "$STATUS" | grep -q '"connected":true'; then
+            echo "pgui is ready and auto-connected"
+            exit 0
+          fi
+          echo "waiting for pgui ($i/60)..."
+          sleep 2
+        done
+        echo "pgui did not become ready"
+        exit 1

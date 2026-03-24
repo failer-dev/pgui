@@ -1,0 +1,111 @@
+# ─── Node / Frontend ────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# ─── Go / Backend ────────────────────────────────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.test
+*.out
+coverage.out
+coverage.html
+*.prof
+*.pprof
+*.coverprofile
+backend/bin/
+backend/pgui
+go.work
+go.work.sum
+
+# ─── Build / Cache ───────────────────────────────────────────────────────────
+.cache/
+dist/
+bin/
+tmp/
+
+# ─── Environment & Secrets ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.sample
+.envrc
+.direnv/
+*.local
+*.secret
+*.secrets
+*.token
+*.tokens
+*.credentials
+*.creds
+*.password
+*.passwords
+*.passwd
+
+# ─── Keys & Certificates ─────────────────────────────────────────────────────
+*.key
+*.keys
+*.pem
+*.asc
+*.cer
+*.crt
+*.csr
+*.der
+*.p12
+*.pfx
+*.pub
+*.ovpn
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+known_hosts
+authorized_keys
+
+# ─── Database ────────────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+
+# ─── Backups ─────────────────────────────────────────────────────────────────
+*.bak
+*.backup
+*.orig
+
+# ─── Cloud Credentials ───────────────────────────────────────────────────────
+.aws/
+.azure/
+.gcp/
+.config/gcloud/
+.docker/
+.kube/
+.terraform/
+
+# ─── Package Manager Credentials ─────────────────────────────────────────────
+.npmrc
+.netrc
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Editor / IDE ────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ─── Project-specific ────────────────────────────────────────────────────────
+settings*json

@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pgui-example-postgres
+    environment:
+      POSTGRES_DB: ecommerce_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgui_example_pgdata:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+
+  pgui:
+    image: ghcr.io/failer-dev/pgui:latest
+    container_name: pgui-example-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ecommerce_demo?sslmode=disable
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgui_example_pgdata:
