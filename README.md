@@ -22,13 +22,7 @@ The fastest way to try pgui is with the included demo environment:
 task example:up
 ```
 
-Then open [http://localhost:8080](http://localhost:8080). The app auto-connects to a seeded PostgreSQL database with sample data spread across four schemas.
-
-```bash
-task example:down   # stop
-task example:reset  # stop + wipe volumes
-task example:logs   # tail logs
-```
+Then open [http://localhost:8080](http://localhost:8080).
 
 > Requires [Docker](https://docs.docker.com/get-docker/) and [Task](https://taskfile.dev/installation/).
 

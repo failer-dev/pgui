@@ -4,6 +4,7 @@ tasks:
   example:up:
     desc: "Start the full demo environment with Postgres seed data and pgui"
     cmds:
+      - docker compose -f example/docker-compose.yml down -v --remove-orphans
       - docker compose -f example/docker-compose.yml up -d --build
       - task: example:_wait-postgres
       - task: example:_wait-pgui
