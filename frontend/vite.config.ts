@@ -6,6 +6,18 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/@codemirror") || id.includes("node_modules/@lezer") || id.includes("node_modules/@uiw/react-codemirror")) {
+            return "codemirror";
+          }
+          if (id.includes("node_modules/sql-formatter")) {
+            return "sql-formatter";
+          }
+        },
+      },
+    },
   },
   server: {
     port: 5173,
