@@ -14,17 +14,17 @@ import (
 var errNotConnected = errors.New("database is not connected")
 
 type Store struct {
-	mu      sync.RWMutex
-	pool    *pgxpool.Pool
-	status  ConnectionStatus
+	mu       sync.RWMutex
+	pool     *pgxpool.Pool
+	status   ConnectionStatus
 	readonly bool
 }
 
 func NewStore() *Store {
 	return &Store{
-		status: ConnectionStatus{
+		status: withAppSettings(ConnectionStatus{
 			Mode: "read-write",
-		},
+		}),
 		readonly: strings.EqualFold(os.Getenv("READ_ONLY"), "true"),
 	}
 }
@@ -74,7 +74,7 @@ func (s *Store) Connect(ctx context.Context, dsn string) error {
 		return err
 	}
 
-	nextStatus := statusFromDSN(dsn, s.mode())
+	nextStatus := withAppSettings(statusFromDSN(dsn, s.mode()))
 	nextStatus.Connected = true
 	nextStatus.AutoConnectAttempted = true
 
@@ -129,4 +129,22 @@ func statusFromDSN(dsn, mode string) ConnectionStatus {
 		status.User = u.User.Username()
 	}
 	return status
+}
+
+func withAppSettings(status ConnectionStatus) ConnectionStatus {
+	status.BrandSectionName = strings.TrimSpace(os.Getenv("BRAND_SECTION_NAME"))
+	status.BrandSectionEnv = strings.TrimSpace(os.Getenv("BRAND_SECTION_ENV"))
+	status.Theme = configuredTheme()
+	return status
+}
+
+func configuredTheme() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("THEME"))) {
+	case "light":
+		return "light"
+	case "dark":
+		return "dark"
+	default:
+		return "system"
+	}
 }

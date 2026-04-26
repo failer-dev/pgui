@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -17,6 +17,17 @@ import (
 )
 
 var identPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+const (
+	sqlExecutionTimeout = 10 * time.Second
+	maxSQLResultRows    = 1000
+	maxSQLResultBytes   = 5 * 1024 * 1024
+)
+
+type rowCollection struct {
+	Rows      []map[string]any
+	Truncated bool
+}
 
 func parseTableName(table string) (string, string, error) {
 	parts := strings.Split(table, ".")
@@ -126,6 +137,143 @@ func (s *Store) TableMetadata(ctx context.Context, table string) (TableMetadata,
 	}
 	metadata.Editable = len(metadata.PrimaryKey) > 0 && !s.readonly
 	return metadata, nil
+}
+
+func (s *Store) SQLCatalog(ctx context.Context) (SQLCatalogResponse, error) {
+	pool, err := s.Pool()
+	if err != nil {
+		return SQLCatalogResponse{}, err
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT
+			c.table_schema,
+			c.table_name,
+			c.column_name,
+			c.data_type,
+			c.is_nullable,
+			EXISTS (
+				SELECT 1
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu
+				  ON tc.constraint_name = kcu.constraint_name
+				 AND tc.table_schema = kcu.table_schema
+				 AND tc.table_name = kcu.table_name
+				WHERE tc.constraint_type = 'PRIMARY KEY'
+				  AND tc.table_schema = c.table_schema
+				  AND tc.table_name = c.table_name
+				  AND kcu.column_name = c.column_name
+			) AS is_primary_key
+		FROM information_schema.columns c
+		JOIN information_schema.tables t
+		  ON t.table_schema = c.table_schema
+		 AND t.table_name = c.table_name
+		WHERE t.table_type = 'BASE TABLE'
+		  AND c.table_schema NOT IN ('information_schema')
+		  AND c.table_schema NOT LIKE 'pg_%'
+		ORDER BY c.table_schema, c.table_name, c.ordinal_position`)
+	if err != nil {
+		return SQLCatalogResponse{}, err
+	}
+	defer rows.Close()
+
+	resp := SQLCatalogResponse{}
+	schemaIndexes := map[string]int{}
+	tableIndexes := map[string]int{}
+	for rows.Next() {
+		var schemaName, tableName, columnName, dataType, nullable string
+		var isPrimaryKey bool
+		if err := rows.Scan(&schemaName, &tableName, &columnName, &dataType, &nullable, &isPrimaryKey); err != nil {
+			return SQLCatalogResponse{}, err
+		}
+
+		schemaIndex, ok := schemaIndexes[schemaName]
+		if !ok {
+			schemaIndex = len(resp.Schemas)
+			schemaIndexes[schemaName] = schemaIndex
+			resp.Schemas = append(resp.Schemas, SQLCatalogSchema{Name: schemaName})
+		}
+
+		tableKey := schemaName + "." + tableName
+		tableIndex, ok := tableIndexes[tableKey]
+		if !ok {
+			tableIndex = len(resp.Schemas[schemaIndex].Tables)
+			tableIndexes[tableKey] = tableIndex
+			resp.Schemas[schemaIndex].Tables = append(resp.Schemas[schemaIndex].Tables, SQLCatalogTable{Name: tableName})
+		}
+
+		resp.Schemas[schemaIndex].Tables[tableIndex].Columns = append(resp.Schemas[schemaIndex].Tables[tableIndex].Columns, SQLCatalogColumn{
+			Name:         columnName,
+			DataType:     dataType,
+			Nullable:     nullable == "YES",
+			IsPrimaryKey: isPrimaryKey,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return SQLCatalogResponse{}, err
+	}
+
+	relationshipRows, err := pool.Query(ctx, `
+		SELECT
+			con.conname,
+			source_ns.nspname AS source_schema,
+			source_cls.relname AS source_table,
+			ARRAY(
+				SELECT source_attr.attname::text
+				FROM unnest(con.conkey) WITH ORDINALITY AS source_key(attnum, ordinality)
+				JOIN pg_attribute source_attr
+				  ON source_attr.attrelid = con.conrelid
+				 AND source_attr.attnum = source_key.attnum
+				ORDER BY source_key.ordinality
+			) AS source_columns,
+			target_ns.nspname AS target_schema,
+			target_cls.relname AS target_table,
+			ARRAY(
+				SELECT target_attr.attname::text
+				FROM unnest(con.confkey) WITH ORDINALITY AS target_key(attnum, ordinality)
+				JOIN pg_attribute target_attr
+				  ON target_attr.attrelid = con.confrelid
+				 AND target_attr.attnum = target_key.attnum
+				ORDER BY target_key.ordinality
+			) AS target_columns
+		FROM pg_constraint con
+		JOIN pg_class source_cls ON source_cls.oid = con.conrelid
+		JOIN pg_namespace source_ns ON source_ns.oid = source_cls.relnamespace
+		JOIN pg_class target_cls ON target_cls.oid = con.confrelid
+		JOIN pg_namespace target_ns ON target_ns.oid = target_cls.relnamespace
+		WHERE con.contype = 'f'
+		  AND source_cls.relkind IN ('r', 'p')
+		  AND target_cls.relkind IN ('r', 'p')
+		  AND source_ns.nspname NOT IN ('information_schema')
+		  AND source_ns.nspname NOT LIKE 'pg_%'
+		  AND target_ns.nspname NOT IN ('information_schema')
+		  AND target_ns.nspname NOT LIKE 'pg_%'
+		ORDER BY source_ns.nspname, source_cls.relname, con.conname`)
+	if err != nil {
+		return SQLCatalogResponse{}, err
+	}
+	defer relationshipRows.Close()
+
+	for relationshipRows.Next() {
+		var relationship SQLCatalogRelationship
+		if err := relationshipRows.Scan(
+			&relationship.Name,
+			&relationship.From.Schema,
+			&relationship.From.Table,
+			&relationship.From.Columns,
+			&relationship.To.Schema,
+			&relationship.To.Table,
+			&relationship.To.Columns,
+		); err != nil {
+			return SQLCatalogResponse{}, err
+		}
+		resp.Relationships = append(resp.Relationships, relationship)
+	}
+	if err := relationshipRows.Err(); err != nil {
+		return SQLCatalogResponse{}, err
+	}
+
+	return resp, nil
 }
 
 func normalizeDisplayType(dataType string) string {
@@ -246,20 +394,39 @@ func (s *Store) TableRows(ctx context.Context, table string, page, pageSize int,
 }
 
 func collectRows(rows pgx.Rows) ([]map[string]any, error) {
+	collection, err := collectRowsWithLimits(rows, 0, 0)
+	return collection.Rows, err
+}
+
+func collectRowsWithLimits(rows pgx.Rows, maxRows, maxBytes int) (rowCollection, error) {
 	fields := rows.FieldDescriptions()
 	items := []map[string]any{}
+	bytesUsed := 0
 	for rows.Next() {
+		if maxRows > 0 && len(items) >= maxRows {
+			return rowCollection{Rows: items, Truncated: true}, nil
+		}
 		values, err := rows.Values()
 		if err != nil {
-			return nil, err
+			return rowCollection{}, err
 		}
 		item := make(map[string]any, len(fields))
 		for i, field := range fields {
 			item[string(field.Name)] = normalizeValue(values[i])
 		}
+		if maxBytes > 0 {
+			payload, err := json.Marshal(item)
+			if err != nil {
+				return rowCollection{}, err
+			}
+			bytesUsed += len(payload)
+			if bytesUsed > maxBytes {
+				return rowCollection{}, fmt.Errorf("query result is larger than %d bytes", maxBytes)
+			}
+		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	return rowCollection{Rows: items}, rows.Err()
 }
 
 func normalizeValue(value any) any {
@@ -428,6 +595,94 @@ func (s *Store) SaveChanges(ctx context.Context, table string, req SaveRequest) 
 		return SaveResponse{}, err
 	}
 	return SaveResponse{Updated: updated}, nil
+}
+
+func (s *Store) ExecuteSQL(ctx context.Context, req SQLExecuteRequest) (SQLExecuteResponse, error) {
+	sqlText := strings.TrimSpace(req.SQL)
+	if sqlText == "" {
+		return SQLExecuteResponse{}, errors.New("SQL is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, sqlExecutionTimeout)
+	defer cancel()
+
+	readQuery := isReadOnlySQL(sqlText)
+	if s.readonly && !readQuery {
+		return SQLExecuteResponse{}, errors.New("read-only mode blocks write and DDL statements")
+	}
+
+	pool, err := s.Pool()
+	if err != nil {
+		return SQLExecuteResponse{}, err
+	}
+
+	start := time.Now()
+	if readQuery {
+		tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return SQLExecuteResponse{}, err
+		}
+		defer tx.Rollback(ctx)
+
+		rows, err := tx.Query(ctx, sqlText)
+		if err != nil {
+			return SQLExecuteResponse{}, err
+		}
+		fields := rows.FieldDescriptions()
+
+		collection, err := collectRowsWithLimits(rows, maxSQLResultRows, maxSQLResultBytes)
+		if err != nil {
+			rows.Close()
+			return SQLExecuteResponse{}, err
+		}
+		rows.Close()
+		if err := tx.Commit(ctx); err != nil {
+			return SQLExecuteResponse{}, err
+		}
+
+		columns := make([]string, 0, len(fields))
+		for _, field := range fields {
+			columns = append(columns, string(field.Name))
+		}
+
+		return SQLExecuteResponse{
+			Columns:   columns,
+			Rows:      collection.Rows,
+			QueryTime: time.Since(start).Milliseconds(),
+			ReadOnly:  true,
+			Message:   sqlResultMessage(len(collection.Rows), collection.Truncated),
+			Truncated: collection.Truncated,
+		}, nil
+	}
+
+	tag, err := pool.Exec(ctx, sqlText)
+	if err != nil {
+		return SQLExecuteResponse{}, err
+	}
+
+	return SQLExecuteResponse{
+		AffectedRows: tag.RowsAffected(),
+		QueryTime:    time.Since(start).Milliseconds(),
+		ReadOnly:     false,
+		Message:      tag.String(),
+	}, nil
+}
+
+func sqlResultMessage(rowCount int, truncated bool) string {
+	if truncated {
+		return fmt.Sprintf("first %d row(s) returned", rowCount)
+	}
+	return fmt.Sprintf("%d row(s) returned", rowCount)
+}
+
+func isReadOnlySQL(sqlText string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.TrimLeft(sqlText, "(\n\r\t ")))
+	readPrefixes := []string{"select", "with", "show", "explain", "values"}
+	for _, prefix := range readPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func castInput(value any, displayType string) any {

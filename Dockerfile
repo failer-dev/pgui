@@ -4,7 +4,7 @@ COPY frontend/ .
 RUN npm ci
 RUN npm run build
 
-FROM golang:1.26-alpine AS backend-build
+FROM golang:1.26.2-alpine AS backend-build
 WORKDIR /app
 COPY backend/ .
 RUN go mod download
@@ -12,6 +12,7 @@ RUN go build -o /pgui .
 
 FROM alpine:3.21
 WORKDIR /app
+ENV HOST=0.0.0.0
 ENV PORT=8080
 COPY --from=backend-build /pgui /usr/local/bin/pgui
 COPY --from=frontend-build /app/dist ./frontend/dist
