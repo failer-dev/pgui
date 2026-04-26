@@ -2,14 +2,15 @@ version: "3"
 
 tasks:
   example:up:
-    desc: "Start the full demo environment with Postgres seed data and pgui"
+    desc: "Build and start the local demo environment with Postgres seed data and pgui"
     cmds:
       - docker compose -f example/docker-compose.yml down -v --remove-orphans
-      - docker compose -f example/docker-compose.yml up -d --build
+      - docker compose -f example/docker-compose.yml build --no-cache pgui
+      - docker compose -f example/docker-compose.yml up -d --force-recreate
       - task: example:_wait-postgres
       - task: example:_wait-pgui
       - echo ""
-      - echo "pgui demo is ready:"
+      - echo "pgui demo is ready with the local build:"
       - echo "  http://localhost:8080"
 
   example:down:
@@ -50,11 +51,17 @@ tasks:
         for i in $(seq 1 60); do
           STATUS=$(curl -fsS http://localhost:8080/api/connection/status 2>/dev/null || true)
           if echo "$STATUS" | grep -q '"connected":true'; then
-            echo "pgui is ready and auto-connected"
-            exit 0
+            SQL_STATUS=$(curl -fsS \
+              -H 'Content-Type: application/json' \
+              -d '{"sql":"select 1 as ok"}' \
+              http://localhost:8080/api/sql/execute 2>/dev/null || true)
+            if echo "$SQL_STATUS" | grep -q '"ok"'; then
+              echo "pgui is ready, auto-connected, and SQL console is available"
+              exit 0
+            fi
           fi
           echo "waiting for pgui ($i/60)..."
           sleep 2
         done
-        echo "pgui did not become ready"
+        echo "pgui did not become ready with SQL console support"
         exit 1

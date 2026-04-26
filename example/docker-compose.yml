@@ -3,11 +3,11 @@ services:
     image: postgres:16-alpine
     container_name: pgui-example-postgres
     environment:
-      POSTGRES_DB: ecommerce_demo
+      POSTGRES_DB: salon_ops_demo
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_demo"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d salon_ops_demo"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -16,16 +16,23 @@ services:
       - ./sql:/docker-entrypoint-initdb.d:ro
 
   pgui:
-    image: ghcr.io/failer-dev/pgui:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: pgui-example:local
     container_name: pgui-example-app
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      HOST: 0.0.0.0
       PORT: 8080
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ecommerce_demo?sslmode=disable
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/salon_ops_demo?sslmode=disable
+      BRAND_SECTION_NAME: FAILER
+      BRAND_SECTION_ENV: prod
+      THEME: system
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   pgui_example_pgdata:
